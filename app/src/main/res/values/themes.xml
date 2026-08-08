@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 側で Material 3 のカラースキームを組むので、ここは素の背景だけ用意する。 -->
+    <style name="Theme.VoiceTester" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

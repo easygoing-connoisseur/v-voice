@@ -1,0 +1,20 @@
+# 改行コードはリポジトリ側を LF に固定する。
+* text=auto eol=lf
+
+# Windows 専用のものは CRLF のまま扱う。
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+# gradlew は Unix のシェルスクリプトなので必ず LF。
+# CRLF になると macOS / Linux で "bad interpreter" になる。
+gradlew text eol=lf
+
+# バイナリ。
+*.jar  binary
+*.apk  binary
+*.aab  binary
+*.vvm  binary
+*.dic  binary
+*.bin  binary
+*.so   binary
+*.png  binary

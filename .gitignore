@@ -1,0 +1,22 @@
+# --- ビルド生成物 ---
+build/
+.gradle/
+.kotlin/
+local.properties
+*.apk
+*.aab
+
+# --- 取得物（scripts/fetch_assets.ps1 で再取得できる） ---
+# 辞書 102MB + 音声モデル 55MB。リポジトリには入れない。
+app/src/main/assets/voicevox/
+# ONNX Runtime のネイティブライブラリ
+app/src/main/jniLibs/
+# VOICEVOX CORE の AAR を置くローカル Maven リポジトリ
+localrepo/
+# fetch_assets.ps1 のダウンロードキャッシュ
+.fetch-cache/
+
+# --- IDE ---
+.idea/
+*.iml
+.DS_Store

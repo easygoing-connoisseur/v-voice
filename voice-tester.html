@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>V-VOICE</title>
+<style>
+  :root{
+    --bg:#070908;
+    --panel:#0d1110;
+    --panel-2:#111614;
+    --line:#1c2320;
+    --line-soft:#141a18;
+    --ink:#d2d8d4;
+    --dim:#6a736e;
+    --off:#363e3a;
+    --grn:#35996a;
+    --grn-dim:#17402c;
+    --red:#c4453c;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono","MS Gothic",monospace;
+    --jp:"Hiragino Sans","Yu Gothic","Noto Sans JP","MS PGothic",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:var(--mono);font-size:13px;line-height:1.5;
+    min-height:100dvh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .shell{max-width:520px;margin:0 auto;min-height:100dvh;
+    border-left:1px solid var(--line);border-right:1px solid var(--line)}
+
+  /* ---------- boot ---------- */
+  #boot{
+    position:fixed;inset:0;z-index:50;background:var(--bg);
+    display:flex;flex-direction:column;justify-content:center;
+    padding:0 28px;gap:2px;cursor:pointer;
+  }
+  #boot.hide{opacity:0;pointer-events:none;transition:opacity .18s linear}
+  #boot .bt{font-size:22px;letter-spacing:.34em;margin-bottom:8px}
+  #boot .bs{font-size:10px;letter-spacing:.24em;color:var(--dim);margin-bottom:30px}
+  #boot .bl{
+    display:flex;justify-content:space-between;font-size:11px;letter-spacing:.14em;
+    color:var(--dim);padding:5px 0;border-bottom:1px solid var(--line-soft);
+    opacity:0;
+  }
+  #boot .bl.on{opacity:1}
+  #boot .bl b{color:var(--grn);font-weight:400}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex;align-items:flex-start;justify-content:space-between;
+    padding:14px 14px 10px;border-bottom:1px solid var(--line);
+  }
+  .brand{font-size:17px;letter-spacing:.3em}
+  .tag{font-size:9px;letter-spacing:.22em;color:var(--dim);margin-top:3px}
+  .net{font-size:10px;letter-spacing:.18em;color:var(--grn);display:flex;align-items:center;gap:6px}
+  .net i{width:5px;height:5px;background:var(--grn);border-radius:50%;display:block}
+
+  /* ---------- nav ---------- */
+  nav{display:flex;border-bottom:1px solid var(--line)}
+  nav button{
+    flex:1;background:none;border:none;border-right:1px solid var(--line);
+    color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.2em;
+    padding:11px 0;cursor:pointer;
+  }
+  nav button:last-child{border-right:none}
+  nav button[aria-selected="true"]{color:var(--ink);background:var(--panel-2);box-shadow:inset 0 -2px 0 var(--grn)}
+
+  /* ---------- generic ---------- */
+  .view{display:none;padding-bottom:32px}
+  .view.on{display:block}
+  .sec{border-bottom:1px solid var(--line)}
+  .sech{
+    font-size:9px;letter-spacing:.24em;color:var(--dim);
+    padding:12px 14px 7px;display:flex;justify-content:space-between;
+  }
+  .row{
+    display:flex;align-items:center;justify-content:space-between;gap:14px;
+    padding:11px 14px;border-top:1px solid var(--line-soft);
+    font-size:12px;letter-spacing:.12em;
+  }
+  .row .k{color:var(--dim);white-space:nowrap}
+  .row .v{color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+  button.row{width:100%;background:none;border:none;border-top:1px solid var(--line-soft);
+    font-family:var(--mono);cursor:pointer;text-align:left}
+  button.row:hover .v{color:var(--grn)}
+  button.row .v::after{content:' \25B8';color:var(--dim);font-size:10px}
+  .row.dis,.row.dis .v,.row.dis .k{color:var(--off);cursor:default}
+  .row.dis .v{color:var(--off)}
+  .row input.txt{
+    background:var(--panel);border:1px solid var(--line);border-radius:2px;
+    color:var(--ink);font-family:var(--jp);font-size:14px;letter-spacing:0;
+    padding:6px 9px;width:160px;text-align:right;
+  }
+  .row input.txt:focus{outline:none;border-color:var(--grn)}
+  .row input.txt.wide{width:210px;font-family:var(--mono);font-size:11px;letter-spacing:.04em}
+  .row .sel{
+    background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:2px;
+    font-family:var(--jp);font-size:13px;padding:7px 9px;max-width:230px;
+  }
+  .row .sel:focus{outline:none;border-color:var(--grn)}
+  .sech .ok{color:var(--grn)}
+  .sech .ng{color:var(--red)}
+
+  /* ---------- status / wave ---------- */
+  .status{padding:12px 14px 6px;display:flex;align-items:center;gap:8px;
+    font-size:11px;letter-spacing:.2em;color:var(--dim)}
+  .status i{width:6px;height:6px;border-radius:50%;background:var(--off);display:block;flex:none}
+  .status.live{color:var(--grn)}
+  .status.live i{background:var(--grn)}
+  /* 設定は SYSTEM タブに移したので、現在値だけ MAIN の右肩に出しておく */
+  .cfgnow{margin-left:auto;color:var(--off);font-size:10px;letter-spacing:.14em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .live-text{
+    padding:0 14px 8px;font-family:var(--jp);font-size:14px;line-height:1.6;
+    color:var(--ink);min-height:0;letter-spacing:0;
+  }
+  .live-text:empty{display:none}
+  canvas{display:block;width:100%;height:44px;padding:0}
+  .wavewrap{padding:0 14px 12px}
+
+  /* ---------- input ---------- */
+  textarea{
+    width:100%;min-height:34vh;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:2px;
+    font-family:var(--jp);font-size:18px;line-height:1.8;padding:13px 12px;resize:vertical;
+  }
+  textarea:focus{outline:none;border-color:var(--grn-dim)}
+  textarea::placeholder{color:var(--off);font-family:var(--mono);font-size:12px;letter-spacing:.14em}
+  .pad{padding:0 14px 12px}
+
+  /* 操作不可の言語・翻訳表示。MAIN では 1 行の帯にして場所を取らせない */
+  .strip{
+    display:flex;justify-content:space-between;gap:12px;
+    padding:9px 14px;border-top:1px solid var(--line-soft);
+    font-size:10px;letter-spacing:.16em;color:var(--off);cursor:default;
+  }
+  .strip .sk{color:var(--off);opacity:.7;margin-right:6px}
+
+  /* ---------- slider ---------- */
+  .ctl{padding:4px 14px 13px;border-top:1px solid var(--line-soft);margin-top:-1px}
+  .ctlhead{display:flex;justify-content:space-between;font-size:12px;letter-spacing:.12em;
+    padding:11px 0 8px}
+  .ctlhead .k{color:var(--dim)}
+  .ctlhead .v{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{
+    width:100%;appearance:none;-webkit-appearance:none;background:transparent;
+    height:14px;display:block;cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--line)}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:3px;height:13px;margin-top:-6px;
+    background:var(--grn);border:none;border-radius:0;
+  }
+  input[type=range]::-moz-range-track{height:1px;background:var(--line)}
+  input[type=range]::-moz-range-thumb{width:3px;height:13px;background:var(--grn);border:none;border-radius:0}
+
+  /* ---------- speak ---------- */
+  .speakwrap{padding:18px 14px}
+  #speak{
+    width:100%;background:var(--grn-dim);color:#cdEBD9;
+    border:1px solid var(--grn);border-radius:2px;
+    font-family:var(--mono);font-size:17px;letter-spacing:.4em;
+    padding:20px 0 20px 6px;cursor:pointer;
+  }
+  #speak:active{background:#1d5238}
+  #speak:disabled{background:transparent;border-color:var(--line);color:var(--off);cursor:default}
+  #speak.act{background:transparent;border-color:var(--red);color:var(--red)}
+
+  /* ---------- quick ---------- */
+  /* セリフの長さに幅があるので 2 列。8 語ちょうど 4 行で埋まる */
+  .quick{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);
+    border-top:1px solid var(--line)}
+  .quick button{
+    background:var(--panel);border:none;color:var(--ink);
+    font-family:var(--jp);font-size:14px;line-height:1.35;
+    padding:14px 8px;cursor:pointer;
+  }
+  .quick button:hover{background:var(--panel-2);color:var(--grn)}
+  .quick button:active{background:var(--grn-dim)}
+
+  /* ---------- log ---------- */
+  .logitem{padding:11px 14px;border-top:1px solid var(--line-soft)}
+  .logtop{font-size:11px;letter-spacing:.16em;color:var(--dim)}
+  .logtxt{font-family:var(--jp);font-size:14px;line-height:1.55;color:var(--ink);
+    margin:4px 0 6px;word-break:break-word}
+  .logbot{display:flex;justify-content:space-between;align-items:center}
+  .logmeta{font-size:10px;letter-spacing:.16em;color:var(--dim)}
+  .logplay{
+    background:none;border:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;
+    padding:5px 12px;border-radius:2px;cursor:pointer;
+  }
+  .logplay:hover{border-color:var(--grn);color:var(--grn)}
+  .empty{padding:26px 14px;font-size:11px;letter-spacing:.18em;color:var(--off);text-align:center}
+
+  .foot{padding:16px 14px;font-size:10px;letter-spacing:.16em;color:var(--off);line-height:1.9}
+  :focus-visible{outline:1px solid var(--grn);outline-offset:1px}
+  @media (prefers-reduced-motion:reduce){#boot.hide{transition:none}}
+</style>
+</head>
+<body>
+
+<div id="boot">
+  <div class="bt">V-VOICE</div>
+  <div class="bs">SECURE COMMUNICATION SYSTEM</div>
+  <div class="bl" data-i="0"><span>VOICE ENGINE</span><b>READY</b></div>
+  <div class="bl" data-i="1"><span>AUDIO OUTPUT</span><b>READY</b></div>
+  <div class="bl" data-i="2"><span>SYSTEM</span><b>ONLINE</b></div>
+</div>
+
+<div class="shell">
+  <header>
+    <div>
+      <div class="brand">V-VOICE</div>
+      <div class="tag">SECURE COMMUNICATION</div>
+    </div>
+    <div class="net"><i></i>ONLINE</div>
+  </header>
+
+  <nav>
+    <button data-v="main" aria-selected="true">MAIN</button>
+    <button data-v="log" aria-selected="false">LOG</button>
+    <button data-v="system" aria-selected="false">SYSTEM</button>
+  </nav>
+
+  <!-- ================= MAIN ================= -->
+  <section class="view on" id="v-main">
+    <div class="sec">
+      <div class="status" id="status">
+        <i></i><span id="statustext">READY</span>
+        <span class="cfgnow" id="cfgnow">--</span>
+      </div>
+      <div class="live-text" id="livetext"></div>
+      <div class="wavewrap"><canvas id="wave"></canvas></div>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>INPUT MESSAGE</span><span id="charcount">0</span></div>
+      <div class="pad">
+        <textarea id="text" placeholder="INPUT TEXT"></textarea>
+      </div>
+      <div class="strip" aria-disabled="true">
+        <span><span class="sk">LANGUAGE</span> JAPANESE</span>
+        <span><span class="sk">TRANSLATION</span> [ LOCKED ]</span>
+      </div>
+    </div>
+
+    <div class="speakwrap">
+      <button id="speak">SPEAK</button>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>QUICK COMMAND</span></div>
+      <div class="quick" id="quick"></div>
+    </div>
+  </section>
+
+  <!-- ================= LOG ================= -->
+  <section class="view" id="v-log">
+    <div class="sec">
+      <div class="sech"><span>TRANSMISSION LOG</span><span id="logcount">00</span></div>
+      <div id="loglist"><div class="empty">NO RECORDS</div></div>
+    </div>
+    <div class="foot">SESSION LOG IS STORED LOCALLY AND CLEARED ON EXIT.</div>
+  </section>
+
+  <!-- ================= SYSTEM ================= -->
+  <section class="view" id="v-system">
+    <div class="sec">
+      <div class="sech"><span>IDENTITY</span></div>
+      <div class="row">
+        <span class="k">UNIT NAME</span>
+        <input class="txt" id="selfName" type="text" value="ソラ" maxlength="16" aria-label="UNIT NAME">
+      </div>
+      <div class="row">
+        <span class="k">CONTACT 01</span>
+        <input class="txt" id="otherName" type="text" value="タナカ" maxlength="16" aria-label="CONTACT 01">
+      </div>
+      <div class="row">
+        <span class="k">CONTACT 02</span>
+        <input class="txt" id="other2Name" type="text" value="スズキ" maxlength="16" aria-label="CONTACT 02">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>ENGINE</span><span id="engStatus">--</span></div>
+      <button class="row" id="engRow" type="button">
+        <span class="k">SYNTHESIS</span><span class="v" id="engVal">VOICEVOX</span>
+      </button>
+      <div class="row" id="engUrlRow">
+        <span class="k">ENDPOINT</span>
+        <input class="txt wide" id="engUrl" type="text" value="http://localhost:50021" aria-label="ENDPOINT">
+      </div>
+      <button class="row" id="engReconnect" type="button">
+        <span class="k">CONNECTION</span><span class="v">RECONNECT</span>
+      </button>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>VOICE CONFIG</span><span id="cfgEcho">--</span></div>
+      <div class="row">
+        <span class="k">VOICE PROFILE</span>
+        <select class="sel" id="profileSel" aria-label="VOICE PROFILE"></select>
+      </div>
+      <div class="ctl">
+        <div class="ctlhead"><span class="k">SPEED</span><span class="v" id="speedVal">1.35</span></div>
+        <input type="range" id="speed" min="0.5" max="2" step="0.05" value="1.35" aria-label="SPEED">
+      </div>
+      <div class="ctl">
+        <div class="ctlhead"><span class="k">PITCH</span><span class="v" id="pitchVal">+3</span></div>
+        <input type="range" id="pitch" min="-12" max="12" step="1" value="3" aria-label="PITCH">
+      </div>
+      <button class="row" id="intoRow" type="button">
+        <span class="k">INTONATION</span><span class="v" id="intoVal">NATURAL</span>
+      </button>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>CHANNEL</span></div>
+      <div class="row dis" aria-disabled="true">
+        <span class="k">LANGUAGE</span><span class="v">JAPANESE</span>
+      </div>
+      <div class="row dis" aria-disabled="true">
+        <span class="k">TRANSLATION</span><span class="v">[ LOCKED ]</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>SYSTEM</span></div>
+      <div class="row"><span class="k">STABILITY</span><span class="v">HIGH</span></div>
+      <div class="row"><span class="k">NATURALNESS</span><span class="v">HIGH</span></div>
+      <div class="row"><span class="k">OUTPUT</span><span class="v">SPEAKER</span></div>
+      <div class="row"><span class="k">CHANNEL</span><span class="v">LOCAL</span></div>
+    </div>
+    <div class="sec">
+      <div class="sech"><span>DIAGNOSTICS</span></div>
+      <div class="row"><span class="k">BACKEND</span><span class="v" id="sysEngine">--</span></div>
+      <div class="row"><span class="k">PROFILES FOUND</span><span class="v" id="sysCount">0</span></div>
+      <div class="row"><span class="k">LAST SYNTH</span><span class="v" id="sysLast">--</span></div>
+      <div class="row"><span class="k">ENCRYPTION</span><span class="v">AES-256 / LOCAL</span></div>
+    </div>
+    <div class="sec">
+      <div class="sech"><span>CREDIT</span></div>
+      <div class="row"><span class="k">SYNTHESIS</span><span class="v" id="crEngine">--</span></div>
+      <div class="row" id="crCharRow"><span class="k">CHARACTER</span><span class="v" id="crChar">--</span></div>
+      <div class="row" id="crNoticeRow"><span class="k">CREDIT</span><span class="v" id="crNotice">--</span></div>
+      <div class="row" id="crTermsRow"><span class="k">TERMS</span><span class="v">voicevox.hiroshiba.jp</span></div>
+    </div>
+
+    <div class="foot">V-VOICE 1.0 &nbsp;/&nbsp; SECURE COMMUNICATION SYSTEM</div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TTS = (typeof window !== 'undefined' && window.speechSynthesis) ? window.speechSynthesis : null;
+
+/* ---------------- boot ---------------- */
+const boot = $('boot');
+document.querySelectorAll('#boot .bl').forEach(el => {
+  setTimeout(() => el.classList.add('on'), 160 + (+el.dataset.i) * 190);
+});
+const bootDone = () => boot.classList.add('hide');
+setTimeout(bootDone, 1150);
+boot.onclick = bootDone;
+
+/* ---------------- nav ---------------- */
+document.querySelectorAll('nav button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('nav button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + b.dataset.v));
+  };
+});
+
+/* ---------------- credit ---------------- */
+// VOICEVOX を使う場合、利用規約上「VOICEVOX:キャラクター名」のクレジット表記が要る。
+// まだ OS 標準 TTS で鳴らしているので、実際に使っているエンジンを出す。
+// VOICEVOX に切り替えたら mode を 'voicevox'、character に話者名を入れる。
+// 既定の声。九州そら / ノーマル。
+// 他スタイル: あまあま=15, セクシー=17, ツンツン=18, ささやき=19
+const DEFAULT_SPEAKER_ID = 16;
+const ENGINE = { mode: 'voicevox', character: null };
+
+function renderCredit(){
+  const vv = ENGINE.mode === 'voicevox';
+  // 話者を切り替えたらクレジットのキャラクター名も追従させる
+  const p = PROFILES[vi];
+  ENGINE.character = (vv && p && p.character) ? p.character : null;
+  $('crEngine').textContent = vv ? 'VOICEVOX' : 'OS BUILT-IN TTS';
+  $('crChar').textContent = ENGINE.character || '--';
+  $('crNotice').textContent = ENGINE.character ? 'VOICEVOX:' + ENGINE.character : 'VOICEVOX';
+  ['crCharRow','crNoticeRow','crTermsRow'].forEach(id => {
+    $(id).style.display = vv ? '' : 'none';
+  });
+}
+
+/* ---------------- voice profiles ---------------- */
+// OS 音声と VOICEVOX スタイルを同じ形にして扱う。
+//   { label, voice }     … OS TTS
+//   { label, speakerId } … VOICEVOX
+// 端末の音声名をそのまま出すと業務端末に見えないので、OS 側は FEMALE 01 等に置き換える。
+const MALE = /otoya|hattori|ichiro|keita|daichi|naoki|\bmale\b|男性/i;
+let PROFILES = [], vi = 0;
+
+function currentProfile(){ return PROFILES[vi] ? PROFILES[vi].label : '--'; }
+
+function renderProfiles(){
+  const sel = $('profileSel');
+  sel.innerHTML = '';
+  if(!PROFILES.length){
+    const o = document.createElement('option');
+    o.textContent = ENGINE.mode === 'voicevox' ? 'NOT CONNECTED' : 'NO VOICE';
+    sel.appendChild(o); sel.disabled = true;
+  } else {
+    sel.disabled = false;
+    PROFILES.forEach((p, i) => {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = p.label;
+      sel.appendChild(o);
+    });
+    if(vi >= PROFILES.length) vi = 0;
+    sel.value = String(vi);
+  }
+  $('sysCount').textContent = String(PROFILES.length).padStart(2,'0');
+}
+
+function buildOsProfiles(){
+  const all = TTS ? TTS.getVoices() : [];
+  let list = all.filter(v => /ja|JP/i.test(v.lang));
+  if(!list.length) list = all;
+  let f = 0, m = 0;
+  PROFILES = list.map(v => {
+    let label;
+    if(MALE.test(v.name)) { m++; label = 'MALE ' + String(m).padStart(2,'0'); }
+    else { f++; label = 'FEMALE ' + String(f).padStart(2,'0'); }
+    return { label, voice: v };
+  });
+}
+
+function loadVoices(){
+  if(ENGINE.mode !== 'os') return;
+  buildOsProfiles();
+  $('sysEngine').textContent = PROFILES.length ? 'WEB SPEECH API' : 'NOT AVAILABLE';
+  renderProfiles();
+  render();
+}
+
+/* ---------------- VOICEVOX HTTP API ---------------- */
+const VV = { url: 'http://localhost:50021', ok: false, busy: false };
+
+function setEngStatus(text, cls){
+  const el = $('engStatus');
+  el.textContent = text;
+  el.className = cls || '';
+}
+
+async function vvConnect(){
+  VV.url = $('engUrl').value.trim().replace(/\/+$/, '');
+  VV.ok = false;
+  PROFILES = [];
+  renderProfiles();
+  setEngStatus('CONNECTING…');
+  try {
+    const r = await fetch(VV.url + '/speakers');
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    // 1 キャラクターが複数スタイルを持つので、スタイル単位に展開する
+    data.forEach(sp => (sp.styles || []).forEach(st => {
+      PROFILES.push({
+        label: sp.name + ' / ' + st.name,
+        character: sp.name,
+        speakerId: st.id,
+      });
+    }));
+    VV.ok = PROFILES.length > 0;
+    setEngStatus(VV.ok ? 'CONNECTED' : 'NO SPEAKERS', VV.ok ? 'ok' : 'ng');
+    $('sysEngine').textContent = 'VOICEVOX ENGINE';
+  } catch(e) {
+    setEngStatus('UNREACHABLE', 'ng');
+    $('sysEngine').textContent = 'VOICEVOX (OFFLINE)';
+    // 接続できない理由の大半は ENGINE 未起動か CORS。
+    console.warn('VOICEVOX connect failed:', e);
+  }
+  // 既定の声（九州そら / ノーマル）があればそれを選ぶ
+  const idx = PROFILES.findIndex(p => p.speakerId === DEFAULT_SPEAKER_ID);
+  vi = idx >= 0 ? idx : 0;
+  renderProfiles();
+  renderCredit();
+  render();
+}
+
+/** VOICEVOX で合成し、再生できる Blob を返す。 */
+async function vvSynth(text, cfg){
+  const q = await fetch(
+    VV.url + '/audio_query?text=' + encodeURIComponent(text) + '&speaker=' + cfg.speakerId,
+    { method: 'POST' },
+  );
+  if(!q.ok) throw new Error('audio_query HTTP ' + q.status);
+  const query = await q.json();
+
+  // VOICEVOX は抑揚を intonationScale で直接いじれるので、OS TTS 用の分割ハックは要らない。
+  query.speedScale      = cfg.rate;
+  query.pitchScale      = cfg.vvPitch;
+  query.intonationScale = cfg.intonation;
+  // gap=0 のときは VOICEVOX 既定の余韻を残す（0 にすると語尾が詰まる）
+  if(cfg.gap > 0) query.postPhonemeLength = cfg.gap / 1000;
+
+  const s = await fetch(VV.url + '/synthesis?speaker=' + cfg.speakerId, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(query),
+  });
+  if(!s.ok) throw new Error('synthesis HTTP ' + s.status);
+  return await s.blob();
+}
+
+$('engRow').onclick = () => {
+  ENGINE.mode = ENGINE.mode === 'os' ? 'voicevox' : 'os';
+  $('engVal').textContent = ENGINE.mode === 'voicevox' ? 'VOICEVOX' : 'OS BUILT-IN TTS';
+  stopAll();
+  audioCache.clear();
+  if(ENGINE.mode === 'voicevox'){
+    vvConnect();
+  } else {
+    setEngStatus('--');
+    loadVoices();
+    renderCredit();
+  }
+};
+$('engReconnect').onclick = () => { if(ENGINE.mode === 'voicevox') vvConnect(); };
+$('engUrl').onchange = () => { if(ENGINE.mode === 'voicevox') vvConnect(); };
+$('profileSel').onchange = e => { vi = +e.target.value || 0; renderCredit(); render(); };
+
+/* ---------------- settings ---------------- */
+const INTONATIONS = [
+  // label,     文を割るか, 区切りの間(ms), VOICEVOX の intonationScale
+  //   OS TTS は抑揚を直接いじれないので「文を細かく割る」ことで平坦化する。
+  //   VOICEVOX は intonationScale があるので分割せずに済む。
+  ['NATURAL',   false, 0,   1.0],
+  ['FLAT',      true,  180, 0.5],
+  ['MONOTONE',  true,  340, 0.0],
+];
+let ii = 0;
+
+const speed = $('speed'), pitch = $('pitch'), textEl = $('text');
+
+// 表示は -12〜+12 の整数。TTS の pitch(0.1〜2.0) に線形で写す。
+const ttsPitch = () => Math.max(0.1, Math.min(2, 1 + (+pitch.value / 12) * 0.9));
+const speedVal = () => (+speed.value);
+
+function render(){
+  const sp = speedVal().toFixed(2);
+  const pt = (+pitch.value > 0 ? '+' : '') + pitch.value;
+  const it = INTONATIONS[ii][0];
+  const summary = currentProfile() + ' / ' + sp + ' / ' + it;
+  $('speedVal').textContent = sp;
+  $('pitchVal').textContent = pt;
+  $('intoVal').textContent = it;
+  $('cfgnow').textContent = summary;
+  $('cfgEcho').textContent = summary;
+  $('charcount').textContent = String(textEl.value.length).padStart(3,'0');
+  $('speak').disabled = !canSpeak() || !textEl.value.trim();
+}
+
+function canSpeak(){
+  if(!PROFILES.length) return false;
+  return ENGINE.mode === 'voicevox' ? VV.ok : !!TTS;
+}
+
+$('intoRow').onclick = () => { ii = (ii + 1) % INTONATIONS.length; render(); };
+speed.oninput = render;
+pitch.oninput = render;
+textEl.oninput = render;
+
+/* ---------------- quick command ---------------- */
+// 呼び名は SYSTEM > IDENTITY で差し替えられるようテンプレートにしてある。
+// 既定値は特定の作品や実在の人物を指さない中立なもの。
+const IDENT = { self: 'ソラ', other: 'タナカ', other2: 'スズキ' };
+const QUICK = [
+  '私は{self}です',
+  'よろしくね',
+  '超キケン！ 超キケン！',
+  '超びっくり！ 超びっくり！',
+  '{other2}さん',
+  'どうかしました？',
+  '{other}さん',
+  '了解したよ',
+];
+
+// {other} は {other2} を巻き込まない（\{other\} が閉じ括弧まで要求するため）。
+const DEFAULT_TEXT_TEMPLATE = '{other}サン、イクヨ';
+
+const fill = t => t
+  .replace(/\{self\}/g,   IDENT.self   || 'ソラ')
+  .replace(/\{other2\}/g, IDENT.other2 || 'スズキ')
+  .replace(/\{other\}/g,  IDENT.other  || 'タナカ');
+
+function renderQuick(){
+  const box = $('quick');
+  box.innerHTML = '';
+  QUICK.forEach(tpl => {
+    const t = fill(tpl);
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = t;
+    // 入力欄へセットしたうえで即発話する（確認の一手間を挟まない）
+    b.onclick = () => speakNow(t, true);
+    box.appendChild(b);
+  });
+}
+
+$('selfName').oninput   = e => { IDENT.self   = e.target.value.trim(); renderQuick(); };
+$('otherName').oninput  = e => { IDENT.other  = e.target.value.trim(); renderQuick(); };
+$('other2Name').oninput = e => { IDENT.other2 = e.target.value.trim(); renderQuick(); };
+
+/* ---------------- waveform ---------------- */
+// speechSynthesis の出力音声は Web Audio 側から取れないため、波形は再生状態に
+// 同期して描くだけの表示。onboundary で振幅を跳ねさせて発話に追従させている。
+const cv = $('wave'), ctx = cv.getContext('2d');
+let amp = 0, tt = 0, raf = null, speaking = false;
+
+function fit(){
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.round(cv.clientWidth * dpr));
+  cv.height = Math.max(1, Math.round(44 * dpr));
+}
+fit();
+window.addEventListener('resize', () => { fit(); if(!speaking) drawIdle(); });
+
+function line(fn, color){
+  const w = cv.width, h = cv.height, mid = h / 2;
+  ctx.clearRect(0, 0, w, h);
+  ctx.lineWidth = Math.max(1, Math.round((window.devicePixelRatio || 1)));
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  for(let x = 0; x <= w; x++){
+    const y = fn(x / w, mid);
+    if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function drawIdle(){ line((p, mid) => mid, '#242c29'); }
+
+function drawLive(){
+  // VOICEVOX 経路では AnalyserNode から実際の波形が取れる。
+  // OS TTS は出力音声にアクセスできないので、従来どおり擬似波形を描く。
+  if(analyser && ENGINE.mode === 'voicevox' && audioEl && !audioEl.paused){
+    const buf = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(buf);
+    const w = cv.width, h = cv.height, mid = h / 2;
+    line((p, m) => {
+      const v = (buf[Math.min(buf.length - 1, Math.floor(p * buf.length))] - 128) / 128;
+      return m + v * m * 0.9;
+    }, '#35996a');
+  } else {
+    const env = p => Math.sin(Math.PI * p);
+    line((p, mid) => {
+      const a = amp * env(p) * mid * 0.86;
+      return mid
+        + Math.sin(p * 41 + tt * 0.17) * a * 0.55
+        + Math.sin(p * 103 - tt * 0.29) * a * 0.28
+        + Math.sin(p * 14 + tt * 0.08) * a * 0.22;
+    }, '#35996a');
+    amp += (0.34 - amp) * 0.07;
+  }
+  tt += 1;
+  raf = requestAnimationFrame(drawLive);
+}
+drawIdle();
+
+function setSpeaking(on, label, statusLabel){
+  speaking = on;
+  $('status').classList.toggle('live', on);
+  $('statustext').textContent = on ? (statusLabel || 'VOICE ACTIVE') : 'READY';
+  $('livetext').textContent = on ? (label || '') : '';
+  $('speak').textContent = on ? 'STOP' : 'SPEAK';
+  $('speak').classList.toggle('act', on);
+  if(on){
+    if(!raf){ amp = 0.34; drawLive(); }
+  } else {
+    if(raf){ cancelAnimationFrame(raf); raf = null; }
+    amp = 0; drawIdle();
+  }
+}
+
+/* ---------------- speak ---------------- */
+let seqTimer = null;
+// cancel() は中断した発話の onend を発火させる実装があり、放っておくと
+// 古い列の続きが新しい再生に割り込む。世代番号で古い列を無効化する。
+let gen = 0;
+
+function chunk(t, split){
+  if(!split) return [t];
+  return t.split(/(?<=[。、！？!?,．\.\n])/).map(s => s.trim()).filter(Boolean);
+}
+
+function speakSeq(parts, i, cfg, myGen){
+  if(myGen !== gen) return;
+  if(i >= parts.length){ setSpeaking(false); return; }
+  const u = new SpeechSynthesisUtterance(parts[i]);
+  const p = PROFILES[cfg.vi];
+  if(p && p.voice){ u.voice = p.voice; u.lang = p.voice.lang; }
+  u.rate = cfg.rate;
+  u.pitch = cfg.pitch;
+  u.onboundary = () => { if(myGen === gen) amp = Math.min(1, amp + 0.42); };
+  u.onend = () => {
+    if(myGen !== gen) return;
+    seqTimer = setTimeout(() => speakSeq(parts, i + 1, cfg, myGen), cfg.gap);
+  };
+  u.onerror = () => { if(myGen === gen) setSpeaking(false); };
+  TTS.speak(u);
+}
+
+function stopAll(){
+  gen++;
+  if(seqTimer){ clearTimeout(seqTimer); seqTimer = null; }
+  if(TTS) TTS.cancel();
+  if(audioEl){ audioEl.pause(); audioEl.currentTime = 0; }
+  setSpeaking(false);
+}
+
+/* ---- VOICEVOX 再生 ---- */
+// 同じ文言・同じ設定なら合成をやり直さない。クイックコマンドの 2 回目以降は待ち時間ゼロになる。
+const audioCache = new Map();
+let audioEl = null, actx = null, analyser = null, srcNode = null;
+
+function cacheKey(text, cfg){
+  return [text, cfg.speakerId, cfg.rate, cfg.vvPitch, cfg.intonation, cfg.gap].join('|');
+}
+
+/** Audio 要素を AnalyserNode に繋いで、実波形を描けるようにする。 */
+function ensureAudioGraph(){
+  if(!audioEl){
+    audioEl = new Audio();
+    audioEl.preload = 'auto';
+  }
+  if(!actx){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    actx = new AC();
+    analyser = actx.createAnalyser();
+    analyser.fftSize = 1024;
+    srcNode = actx.createMediaElementSource(audioEl);
+    srcNode.connect(analyser);
+    analyser.connect(actx.destination);
+  }
+  if(actx.state === 'suspended') actx.resume();
+}
+
+async function runVoicevox(text, cfg, myGen){
+  ensureAudioGraph();
+  const key = cacheKey(text, cfg);
+  let blob = audioCache.get(key);
+
+  if(!blob){
+    setSpeaking(true, text, 'SYNTHESIZING');
+    const t0 = performance.now();
+    try {
+      blob = await vvSynth(text, cfg);
+    } catch(e){
+      if(myGen === gen){ setSpeaking(false); setEngStatus('SYNTH FAILED', 'ng'); }
+      console.warn('VOICEVOX synthesis failed:', e);
+      return;
+    }
+    $('sysLast').textContent = Math.round(performance.now() - t0) + ' ms';
+    audioCache.set(key, blob);
+  }
+  if(myGen !== gen) return;
+
+  if(audioEl.dataset.url){ URL.revokeObjectURL(audioEl.dataset.url); }
+  const url = URL.createObjectURL(blob);
+  audioEl.dataset.url = url;
+  audioEl.src = url;
+  audioEl.onended = () => { if(myGen === gen) setSpeaking(false); };
+  audioEl.onerror = () => { if(myGen === gen) setSpeaking(false); };
+  setSpeaking(true, text);
+  audioEl.play().catch(e => {
+    if(myGen === gen) setSpeaking(false);
+    console.warn('playback failed:', e);
+  });
+}
+
+function run(text, cfg, log){
+  if(!text || !canSpeak()) return;
+  gen++;
+  const myGen = gen;
+  if(seqTimer){ clearTimeout(seqTimer); seqTimer = null; }
+  if(TTS) TTS.cancel();
+  if(audioEl){ audioEl.pause(); audioEl.currentTime = 0; }
+
+  if(cfg.mode === 'voicevox'){
+    runVoicevox(text, cfg, myGen);
+  } else {
+    setSpeaking(true, text);
+    speakSeq(chunk(text, cfg.split), 0, cfg, myGen);
+  }
+  if(log) pushLog(text, cfg);
+}
+
+function currentCfg(){
+  const [, split, gap, intonation] = INTONATIONS[ii];
+  const p = PROFILES[vi] || {};
+  return {
+    mode: ENGINE.mode,
+    vi, split, gap, intonation,
+    rate: speedVal(),
+    pitch: ttsPitch(),                    // OS TTS 用 (0.1〜2.0)
+    vvPitch: (+pitch.value / 12) * 0.15,  // VOICEVOX 用 pitchScale (-0.15〜+0.15)
+    speakerId: p.speakerId,
+    profile: currentProfile(),
+    character: p.character || null,
+  };
+}
+
+/** SPEAK と QUICK の共通入口。再生中でも割り込んで即座に鳴らす。 */
+function speakNow(t, setInput){
+  if(!t) return;
+  if(setInput){ textEl.value = t; }
+  render();
+  run(t, currentCfg(), true);
+}
+
+$('speak').onclick = () => {
+  if(speaking){ stopAll(); return; }
+  speakNow(textEl.value.trim(), false);
+};
+
+/* ---------------- log ---------------- */
+const logs = [];
+
+function stamp(){
+  const d = new Date();
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2,'0')).join(':');
+}
+
+function pushLog(text, cfg){
+  logs.unshift({ time: stamp(), text, cfg });
+  if(logs.length > 50) logs.pop();
+  renderLog();
+}
+
+function renderLog(){
+  const box = $('loglist');
+  $('logcount').textContent = String(logs.length).padStart(2,'0');
+  if(!logs.length){ box.innerHTML = '<div class="empty">NO RECORDS</div>'; return; }
+  box.innerHTML = '';
+  logs.forEach((e, idx) => {
+    const el = document.createElement('div');
+    el.className = 'logitem';
+
+    const top = document.createElement('div');
+    top.className = 'logtop'; top.textContent = e.time;
+
+    const txt = document.createElement('div');
+    txt.className = 'logtxt'; txt.textContent = e.text;
+
+    const bot = document.createElement('div');
+    bot.className = 'logbot';
+    const meta = document.createElement('span');
+    meta.className = 'logmeta';
+    meta.textContent = e.cfg.profile + '  /  ' + e.cfg.rate.toFixed(2);
+    const play = document.createElement('button');
+    play.className = 'logplay'; play.type = 'button'; play.textContent = 'PLAY';
+    // ログは記録時の設定でそのまま再生する
+    play.onclick = () => run(e.text, e.cfg, false);
+    bot.append(meta, play);
+
+    el.append(top, txt, bot);
+    box.appendChild(el);
+  });
+}
+
+/* ---------------- init ---------------- */
+if(!TTS){
+  $('statustext').textContent = 'ENGINE UNAVAILABLE';
+  $('sysEngine').textContent = 'NOT AVAILABLE';
+}
+if(TTS) TTS.onvoiceschanged = loadVoices;
+// 入力欄の初期値も呼び名に追随させる（初期表示時のみ。以降は書き換えない）
+textEl.value = fill(DEFAULT_TEXT_TEMPLATE);
+renderQuick();
+renderCredit();
+render();
+
+// VOICEVOX を既定にしつつ、ENGINE が居なければ OS TTS へ自動で落とす
+(async function initEngine(){
+  if(ENGINE.mode !== 'voicevox'){ loadVoices(); return; }
+  await vvConnect();
+  if(VV.ok) return;
+  ENGINE.mode = 'os';
+  $('engVal').textContent = 'OS BUILT-IN TTS';
+  setEngStatus('FALLBACK → OS TTS', 'ng');
+  loadVoices();
+  renderCredit();
+})();
+window.addEventListener('beforeunload', stopAll);
+</script>
+</body>
+</html>
