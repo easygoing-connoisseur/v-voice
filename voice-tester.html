@@ -171,7 +171,7 @@
   #speak.act{background:transparent;border-color:var(--red);color:var(--red)}
 
   /* ---------- quick ---------- */
-  /* セリフの長さに幅があるので 2 列。8 語ちょうど 4 行で埋まる */
+  /* セリフの長さに幅があるので 2 列。既定の 8 語はちょうど 4 行で埋まる */
   .quick{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);
     border-top:1px solid var(--line)}
   .quick button{
@@ -181,6 +181,28 @@
   }
   .quick button:hover{background:var(--panel-2);color:var(--grn)}
   .quick button:active{background:var(--grn-dim)}
+  /* 奇数個のときの余り。ボタンに見えないよう地の色で埋める */
+  .quick .qfill{background:var(--bg)}
+  .quick .empty{grid-column:1/-1;background:var(--bg)}
+
+  /* ---------- quick edit (SYSTEM) ---------- */
+  .qrow{gap:8px}
+  .qrow .qn{color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .qrow input.qtxt{
+    flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:2px;
+    color:var(--ink);font-family:var(--jp);font-size:14px;letter-spacing:0;padding:6px 9px;
+  }
+  .qrow input.qtxt:focus{outline:none;border-color:var(--grn)}
+  .qdel{
+    flex:none;background:none;border:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;
+    padding:6px 10px;border-radius:2px;cursor:pointer;
+  }
+  .qdel:hover{border-color:var(--red);color:var(--red)}
+  /* 操作そのものが目的の行。行き先が無いので ▸ は出さない */
+  button.row.act .k{color:var(--grn)}
+  button.row.act.warn .k{color:var(--red)}
+  button.row.act:hover{background:var(--panel-2)}
 
   /* ---------- log ---------- */
   .logitem{padding:11px 14px;border-top:1px solid var(--line-soft)}
@@ -284,6 +306,14 @@
         <span class="k">CONTACT 02</span>
         <input class="txt" id="other2Name" type="text" value="スズキ" maxlength="16" aria-label="CONTACT 02">
       </div>
+    </div>
+
+    <div class="sec">
+      <div class="sech"><span>QUICK COMMAND</span><span id="quickCount">00</span></div>
+      <div id="quickEdit"></div>
+      <button class="row act" id="quickAdd" type="button"><span class="k">+ ADD COMMAND</span></button>
+      <button class="row act" id="quickReset" type="button"><span class="k">RESET TO DEFAULTS</span></button>
+      <div class="foot">{self} {other} {other2} ARE REPLACED BY IDENTITY.</div>
     </div>
 
     <div class="sec">
@@ -444,6 +474,7 @@ function buildOsProfiles(){
 function loadVoices(){
   if(ENGINE.mode !== 'os') return;
   buildOsProfiles();
+  restoreProfile();
   $('sysEngine').textContent = PROFILES.length ? 'WEB SPEECH API' : 'NOT AVAILABLE';
   renderProfiles();
   render();
@@ -485,9 +516,8 @@ async function vvConnect(){
     // 接続できない理由の大半は ENGINE 未起動か CORS。
     console.warn('VOICEVOX connect failed:', e);
   }
-  // 既定の声（九州そら / ノーマル）があればそれを選ぶ
-  const idx = PROFILES.findIndex(p => p.speakerId === DEFAULT_SPEAKER_ID);
-  vi = idx >= 0 ? idx : 0;
+  // 前回選んでいた声。無ければ既定の声（九州そら / ノーマル）
+  restoreProfile();
   renderProfiles();
   renderCredit();
   render();
@@ -530,10 +560,11 @@ $('engRow').onclick = () => {
     loadVoices();
     renderCredit();
   }
+  save();
 };
 $('engReconnect').onclick = () => { if(ENGINE.mode === 'voicevox') vvConnect(); };
-$('engUrl').onchange = () => { if(ENGINE.mode === 'voicevox') vvConnect(); };
-$('profileSel').onchange = e => { vi = +e.target.value || 0; renderCredit(); render(); };
+$('engUrl').onchange = () => { save(); if(ENGINE.mode === 'voicevox') vvConnect(); };
+$('profileSel').onchange = e => { vi = +e.target.value || 0; renderCredit(); render(); save(); };
 
 /* ---------------- settings ---------------- */
 const INTONATIONS = [
@@ -571,16 +602,19 @@ function canSpeak(){
   return ENGINE.mode === 'voicevox' ? VV.ok : !!TTS;
 }
 
-$('intoRow').onclick = () => { ii = (ii + 1) % INTONATIONS.length; render(); };
-speed.oninput = render;
-pitch.oninput = render;
+$('intoRow').onclick = () => { ii = (ii + 1) % INTONATIONS.length; render(); save(); };
+speed.oninput = () => { render(); save(); };
+pitch.oninput = () => { render(); save(); };
 textEl.oninput = render;
 
 /* ---------------- quick command ---------------- */
 // 呼び名は SYSTEM > IDENTITY で差し替えられるようテンプレートにしてある。
 // 既定値は特定の作品や実在の人物を指さない中立なもの。
 const IDENT = { self: 'ソラ', other: 'タナカ', other2: 'スズキ' };
-const QUICK = [
+
+// 中身は SYSTEM > QUICK COMMAND から編集でき、編集後はブラウザに保存される。
+// ここはあくまで初期値と RESET の戻り先。
+const DEFAULT_QUICK = [
   '私は{self}です',
   'よろしくね',
   '超キケン！ 超キケン！',
@@ -590,6 +624,9 @@ const QUICK = [
   '{other}さん',
   '了解したよ',
 ];
+/** MAIN の 2 列グリッドが縦に伸びすぎない範囲に留める。 */
+const QUICK_MAX = 12;
+let QUICK = DEFAULT_QUICK.slice();
 
 // {other} は {other2} を巻き込まない（\{other\} が閉じ括弧まで要求するため）。
 const DEFAULT_TEXT_TEMPLATE = '{other}サン、イクヨ';
@@ -602,7 +639,15 @@ const fill = t => t
 function renderQuick(){
   const box = $('quick');
   box.innerHTML = '';
-  QUICK.forEach(tpl => {
+  // 空欄のスロットは押しても鳴らないので、ボタンとしては並べない。
+  const list = QUICK.filter(t => t.trim());
+  if(!list.length){
+    const e = document.createElement('div');
+    e.className = 'empty'; e.textContent = 'NO COMMANDS  /  ADD IN SYSTEM';
+    box.appendChild(e);
+    return;
+  }
+  list.forEach(tpl => {
     const t = fill(tpl);
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = t;
@@ -610,11 +655,154 @@ function renderQuick(){
     b.onclick = () => speakNow(t, true);
     box.appendChild(b);
   });
+  if(list.length % 2){
+    const f = document.createElement('div');
+    f.className = 'qfill';
+    box.appendChild(f);
+  }
 }
 
-$('selfName').oninput   = e => { IDENT.self   = e.target.value.trim(); renderQuick(); };
-$('otherName').oninput  = e => { IDENT.other  = e.target.value.trim(); renderQuick(); };
-$('other2Name').oninput = e => { IDENT.other2 = e.target.value.trim(); renderQuick(); };
+/** SYSTEM 側の編集行。テンプレートのまま（呼び名を埋めずに）見せる。 */
+function renderQuickEdit(){
+  const box = $('quickEdit');
+  box.innerHTML = '';
+  $('quickCount').textContent = String(QUICK.length).padStart(2,'0');
+  QUICK.forEach((tpl, i) => {
+    const row = document.createElement('div');
+    row.className = 'row qrow';
+
+    const n = document.createElement('span');
+    n.className = 'qn'; n.textContent = String(i + 1).padStart(2,'0');
+
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'qtxt'; input.value = tpl;
+    input.placeholder = 'EMPTY';
+    input.setAttribute('aria-label', 'QUICK COMMAND ' + (i + 1));
+    // 打つたびに一覧を作り直すと入力欄が飛ぶので、MAIN 側だけ更新する。
+    input.oninput = () => { QUICK[i] = input.value; renderQuick(); save(); };
+
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'qdel'; del.textContent = 'DEL';
+    del.onclick = () => { QUICK.splice(i, 1); refreshQuick(); };
+
+    row.append(n, input, del);
+    box.appendChild(row);
+  });
+  $('quickAdd').style.display = QUICK.length < QUICK_MAX ? '' : 'none';
+}
+
+function refreshQuick(){ renderQuick(); renderQuickEdit(); save(); }
+
+$('quickAdd').onclick = () => {
+  if(QUICK.length >= QUICK_MAX) return;
+  QUICK.push('');
+  refreshQuick();
+  // 追加した行はすぐ打ち始められるようにする
+  const rows = $('quickEdit').querySelectorAll('input.qtxt');
+  if(rows.length) rows[rows.length - 1].focus();
+};
+
+// 手が滑って書き換えた内容を失わないよう、2 度押しで初期値に戻す。
+let resetArmed = null;
+$('quickReset').onclick = () => {
+  const btn = $('quickReset'), k = btn.querySelector('.k');
+  if(resetArmed){
+    clearTimeout(resetArmed); resetArmed = null;
+    btn.classList.remove('warn'); k.textContent = 'RESET TO DEFAULTS';
+    QUICK = DEFAULT_QUICK.slice();
+    refreshQuick();
+    return;
+  }
+  btn.classList.add('warn'); k.textContent = 'TAP AGAIN TO CONFIRM';
+  resetArmed = setTimeout(() => {
+    resetArmed = null;
+    btn.classList.remove('warn'); k.textContent = 'RESET TO DEFAULTS';
+  }, 3000);
+};
+
+$('selfName').oninput   = e => { IDENT.self   = e.target.value.trim(); renderQuick(); save(); };
+$('otherName').oninput  = e => { IDENT.other  = e.target.value.trim(); renderQuick(); save(); };
+$('other2Name').oninput = e => { IDENT.other2 = e.target.value.trim(); renderQuick(); save(); };
+
+/* ---------------- settings storage ---------------- */
+// 設定はブラウザに残す。LOG は「メモリ内・終了で消去」の仕様なので保存しない。
+// 入力中のテキストも、次回は呼び名から作り直す方が自然なので保存しない。
+const STORE_KEY = 'v-voice.settings';
+
+// 直近に保存した内容。声の一覧は起動のたびに取り直すので、
+// 「前回選んでいた声」を後から突き合わせるのにこれを見る。
+let SAVED = {};
+
+function snapshot(){
+  const p = PROFILES[vi] || {};
+  return {
+    identity: { self: IDENT.self, other: IDENT.other, other2: IDENT.other2 },
+    quick: QUICK.slice(),
+    speed: +speed.value,
+    pitch: +pitch.value,
+    intonation: ii,
+    mode: ENGINE.mode,
+    endpoint: $('engUrl').value.trim(),
+    speakerId: typeof p.speakerId === 'number' ? p.speakerId : null,
+    profileLabel: p.label || null,
+  };
+}
+
+let saveTimer = null;
+
+function writeSettings(){
+  clearTimeout(saveTimer); saveTimer = null;
+  // プライベートモードや容量超過で書けないことがある。動作は変えない。
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(SAVED)); }
+  catch(e){ console.warn('settings save failed:', e); }
+}
+
+/** 書き込みだけ遅らせる。スライダー 1 回で何十回も localStorage を叩かないため。 */
+function save(){
+  SAVED = snapshot();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(writeSettings, 400);
+}
+
+/** 保存済みの設定を読み込んで各コントロールに戻す。声の選択だけは一覧が揃ってから。 */
+function loadSettings(){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); }
+  catch(e){ console.warn('settings load failed:', e); }
+  if(!s || typeof s !== 'object') return;
+  SAVED = s;
+
+  if(s.identity && typeof s.identity === 'object'){
+    ['self','other','other2'].forEach(k => {
+      if(typeof s.identity[k] === 'string') IDENT[k] = s.identity[k];
+    });
+    $('selfName').value   = IDENT.self;
+    $('otherName').value  = IDENT.other;
+    $('other2Name').value = IDENT.other2;
+  }
+  if(Array.isArray(s.quick)){
+    QUICK = s.quick.filter(t => typeof t === 'string').slice(0, QUICK_MAX);
+  }
+  if(Number.isFinite(s.speed)) speed.value = Math.min(2, Math.max(0.5, s.speed));
+  if(Number.isFinite(s.pitch)) pitch.value = Math.min(12, Math.max(-12, Math.round(s.pitch)));
+  if(Number.isInteger(s.intonation) && INTONATIONS[s.intonation]) ii = s.intonation;
+  if(s.mode === 'os' || s.mode === 'voicevox') ENGINE.mode = s.mode;
+  if(typeof s.endpoint === 'string' && s.endpoint) $('engUrl').value = s.endpoint;
+  $('engVal').textContent = ENGINE.mode === 'voicevox' ? 'VOICEVOX' : 'OS BUILT-IN TTS';
+}
+
+/** 一覧が揃ったところで、前回選んでいた声に戻す。無ければ既定の声。 */
+function restoreProfile(){
+  let idx = -1;
+  if(typeof SAVED.speakerId === 'number'){
+    idx = PROFILES.findIndex(p => p.speakerId === SAVED.speakerId);
+  }
+  if(idx < 0 && SAVED.profileLabel){
+    idx = PROFILES.findIndex(p => p.label === SAVED.profileLabel);
+  }
+  if(idx < 0) idx = PROFILES.findIndex(p => p.speakerId === DEFAULT_SPEAKER_ID);
+  vi = idx >= 0 ? idx : 0;
+}
 
 /* ---------------- waveform ---------------- */
 // speechSynthesis の出力音声は Web Audio 側から取れないため、波形は再生状態に
@@ -881,9 +1069,12 @@ if(!TTS){
   $('sysEngine').textContent = 'NOT AVAILABLE';
 }
 if(TTS) TTS.onvoiceschanged = loadVoices;
+// 保存済みの設定は、画面を組み立てる前に戻しておく
+loadSettings();
 // 入力欄の初期値も呼び名に追随させる（初期表示時のみ。以降は書き換えない）
 textEl.value = fill(DEFAULT_TEXT_TEMPLATE);
 renderQuick();
+renderQuickEdit();
 renderCredit();
 render();
 
@@ -898,7 +1089,8 @@ render();
   loadVoices();
   renderCredit();
 })();
-window.addEventListener('beforeunload', stopAll);
+// 遅延中の書き込みが残っていても取りこぼさない
+window.addEventListener('beforeunload', () => { stopAll(); if(saveTimer) writeSettings(); });
 </script>
 </body>
 </html>
