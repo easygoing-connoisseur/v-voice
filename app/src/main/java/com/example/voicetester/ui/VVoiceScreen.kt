@@ -70,7 +70,7 @@ import com.example.voicetester.Identity
 import com.example.voicetester.LogEntry
 import com.example.voicetester.PITCH_MAX
 import com.example.voicetester.PITCH_MIN
-import com.example.voicetester.QUICK_COMMANDS
+import com.example.voicetester.QUICK_MAX
 import com.example.voicetester.SPEED_MAX
 import com.example.voicetester.SPEED_MIN
 import com.example.voicetester.Status
@@ -88,6 +88,7 @@ import com.example.voicetester.ui.theme.VvPanel
 import com.example.voicetester.ui.theme.VvPanel2
 import com.example.voicetester.ui.theme.VvRed
 import com.example.voicetester.ui.theme.VvType
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 private enum class Tab(val label: String) { MAIN("MAIN"), LOG("LOG"), SYSTEM("SYSTEM") }
@@ -359,9 +360,22 @@ private fun SpeakButton(state: VVoiceState, vm: VoiceTesterViewModel) {
 
 @Composable
 private fun QuickGrid(state: VVoiceState, vm: VoiceTesterViewModel) {
-    // セリフの長さに幅があるので 2 列。8 語ちょうど 4 行で埋まる。
+    // 空欄のスロットは押しても鳴らないので、ボタンとしては並べない。
+    val commands = state.quickCommands.filter { it.isNotBlank() }
+    if (commands.isEmpty()) {
+        Text(
+            text = "NO COMMANDS  /  ADD IN SYSTEM",
+            style = VvType.mark.copy(fontSize = 11.sp),
+            color = VvOff,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().drawTopLine(VvLine).padding(vertical = 26.dp),
+        )
+        return
+    }
+
+    // セリフの長さに幅があるので 2 列。
     Column(Modifier.fillMaxWidth().drawTopLine(VvLine)) {
-        QUICK_COMMANDS.chunked(2).forEach { row ->
+        commands.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth().height(62.dp)) {
                 row.forEachIndexed { index, template ->
                     val label = state.identity.fill(template)
@@ -383,6 +397,10 @@ private fun QuickGrid(state: VVoiceState, vm: VoiceTesterViewModel) {
                             textAlign = TextAlign.Center,
                         )
                     }
+                }
+                // 奇数個のときに最後の 1 個だけ横いっぱいに伸びないよう、空きの半マスを置く
+                if (row.size == 1) {
+                    Box(Modifier.weight(1f).fillMaxHeight().drawStartLine(VvLine))
                 }
             }
             Spacer(Modifier.fillMaxWidth().height(1.dp).background(VvLine))
@@ -463,6 +481,26 @@ private fun SystemView(state: VVoiceState, vm: VoiceTesterViewModel) {
         IdentityRow("CONTACT 02", state.identity.other2) {
             vm.onIdentityChange(state.identity.copy(other2 = it))
         }
+
+        SectionHeader("QUICK COMMAND", "%02d".format(state.quickCommands.size))
+        state.quickCommands.forEachIndexed { index, template ->
+            QuickCommandRow(
+                index = index,
+                value = template,
+                onChange = { vm.onQuickCommandChange(index, it) },
+                onRemove = { vm.removeQuickCommand(index) },
+            )
+        }
+        if (state.quickCommands.size < QUICK_MAX) {
+            ActionRow("+ ADD COMMAND", onClick = vm::addQuickCommand)
+        }
+        ResetRow(onConfirm = vm::resetQuickCommands)
+        Text(
+            text = "{self} {other} {other2} ARE REPLACED BY IDENTITY.",
+            style = VvType.mark.copy(fontSize = 10.sp),
+            color = VvOff,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+        )
 
         SectionHeader("VOICE CONFIG", null)
         state.styles.forEach { (id, label) ->
@@ -596,6 +634,74 @@ private fun IdentityRow(key: String, value: String, onChange: (String) -> Unit) 
             textStyle = VvType.body.copy(fontSize = 14.sp, textAlign = TextAlign.End),
             singleLine = true,
         )
+    }
+}
+
+@Composable
+private fun QuickCommandRow(
+    index: Int,
+    value: String,
+    onChange: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawTopLine(VvLineSoft)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("%02d".format(index + 1), style = VvType.label, color = VvDim)
+        Spacer(Modifier.width(10.dp))
+        TerminalTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.weight(1f),
+            textStyle = VvType.body.copy(fontSize = 14.sp),
+            placeholder = "EMPTY",
+            singleLine = true,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .border(BorderStroke(1.dp, VvLine))
+                .clickable { onRemove() }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Text("DEL", style = VvType.mark.copy(fontSize = 10.sp), color = VvDim)
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(label: String, color: Color = VvGreen, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawTopLine(VvLineSoft)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(label, style = VvType.label, color = color)
+    }
+}
+
+/** 手が滑って書き換えた内容を失わないよう、2 度押しで初期値に戻す。 */
+@Composable
+private fun ResetRow(onConfirm: () -> Unit) {
+    var armed by remember { mutableStateOf(false) }
+    LaunchedEffect(armed) {
+        if (armed) {
+            delay(CONFIRM_TIMEOUT_MS)
+            armed = false
+        }
+    }
+    ActionRow(
+        label = if (armed) "TAP AGAIN TO CONFIRM" else "RESET TO DEFAULTS",
+        color = if (armed) VvRed else VvGreen,
+    ) {
+        if (armed) onConfirm()
+        armed = !armed
     }
 }
 
@@ -753,6 +859,9 @@ private fun Waveform(
 
 private const val MIN_BOOT_MS = 1150
 private const val WINDOW_BUCKETS = 150
+
+/** RESET の 2 度押しを待つ時間。押しっぱなしで待たせない程度。 */
+private const val CONFIRM_TIMEOUT_MS = 3000L
 
 /** INPUT MESSAGE の入力欄の高さ。枠の上下 padding 10dp を足して従来どおり 168dp になる。 */
 private val INPUT_MIN_HEIGHT = 148.dp

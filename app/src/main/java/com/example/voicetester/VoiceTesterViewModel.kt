@@ -42,6 +42,7 @@ data class VVoiceState(
     val pitch: Int = DEFAULT_PITCH,
     val gapMs: Int = DEFAULT_GAP_MS,
     val intonationIndex: Int = 0,
+    val quickCommands: List<String> = QUICK_COMMANDS,
     val logs: List<LogEntry> = emptyList(),
     val speakingText: String = "",
     val lastSynthMs: Long? = null,
@@ -188,6 +189,26 @@ class VoiceTesterViewModel(application: Application) : AndroidViewModel(applicat
 
     fun cycleIntonation() =
         _ui.update { it.copy(intonationIndex = (it.intonationIndex + 1) % INTONATIONS.size) }
+
+    /* ------------------------------------------------------ quick command */
+
+    fun onQuickCommandChange(index: Int, value: String) = _ui.update {
+        if (index !in it.quickCommands.indices) return@update it
+        // 1 行のボタンに載せる文言なので、貼り付けなどで紛れ込んだ改行は潰す。
+        val cleaned = value.replace('\n', ' ').replace('\r', ' ')
+        it.copy(quickCommands = it.quickCommands.toMutableList().apply { this[index] = cleaned })
+    }
+
+    fun addQuickCommand() = _ui.update {
+        if (it.quickCommands.size >= QUICK_MAX) it else it.copy(quickCommands = it.quickCommands + "")
+    }
+
+    fun removeQuickCommand(index: Int) = _ui.update {
+        if (index !in it.quickCommands.indices) return@update it
+        it.copy(quickCommands = it.quickCommands.filterIndexed { i, _ -> i != index })
+    }
+
+    fun resetQuickCommands() = _ui.update { it.copy(quickCommands = QUICK_COMMANDS) }
 
     /** SPEAK と QUICK の共通入口。再生中でも割り込んで即座に鳴らす。 */
     fun speak(text: String = _ui.value.text, setInput: Boolean = false, log: Boolean = true) {
