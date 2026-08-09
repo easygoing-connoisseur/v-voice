@@ -5,9 +5,14 @@ import android.speech.tts.Voice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,6 +71,18 @@ data class VVoiceState(
 
     val isSpeaking: Boolean get() = status == Status.ACTIVE || status == Status.SYNTHESIZING
 
+    /** 端末に残す部分だけを抜き出したもの。ここが変わったときだけ書き込む。 */
+    val persisted: PersistedSettings
+        get() = PersistedSettings(
+            identity = identity,
+            styleId = styleId,
+            speed = speed,
+            pitch = pitch,
+            gapMs = gapMs,
+            intonationIndex = intonationIndex,
+            quickCommands = quickCommands,
+        )
+
     val canSpeak: Boolean
         get() = text.isNotBlank() && when (backend) {
             Backend.VOICEVOX -> status != Status.BOOTING && status != Status.FAILED
@@ -73,9 +90,25 @@ data class VVoiceState(
         }
 }
 
+/** 保存済みの設定から初期状態を組み立てる。入力欄の既定文も保存された呼び名に追随させる。 */
+private fun initialState(s: PersistedSettings) = VVoiceState(
+    text = s.identity.fill(DEFAULT_TEXT_TEMPLATE),
+    identity = s.identity,
+    styleId = s.styleId,
+    speed = s.speed,
+    pitch = s.pitch,
+    gapMs = s.gapMs,
+    intonationIndex = s.intonationIndex,
+    quickCommands = s.quickCommands,
+)
+
 class VoiceTesterViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _ui = MutableStateFlow(VVoiceState())
+    private val settings = Settings(application)
+
+    // 起動直後の一瞬だけ既定値が見えるのを避けたいので、読み込みは同期で済ませる。
+    // 読むのは数十バイトの XML 1 枚。
+    private val _ui = MutableStateFlow(initialState(settings.load()))
     val ui: StateFlow<VVoiceState> = _ui.asStateFlow()
 
     private val voicevox = VoicevoxController(application)
@@ -114,6 +147,18 @@ class VoiceTesterViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     init {
+        // 設定は変更のたびには書かず、少し落ち着いてからまとめて書く。
+        // そうしないとスライダーを 1 回動かすだけで何十回も書き込むことになる。
+        viewModelScope.launch {
+            ui.map { it.persisted }
+                .distinctUntilChanged()
+                // 最初の 1 件は今読み込んだ値そのものなので書き戻さない。
+                .drop(1)
+                .collectLatest { snapshot ->
+                    delay(SAVE_DELAY_MS)
+                    withContext(Dispatchers.IO) { settings.save(snapshot) }
+                }
+        }
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 voicevox.initialize { state -> onInitState(state) }
@@ -319,6 +364,8 @@ class VoiceTesterViewModel(application: Application) : AndroidViewModel(applicat
         ((value / step).roundToInt() * step).coerceIn(min, max)
 
     override fun onCleared() {
+        // 遅延保存が走る前に閉じられても取りこぼさない（viewModelScope はもう止まっている）。
+        settings.save(_ui.value.persisted)
         player.stop()
         tts?.shutdown()
         voicevox.close()
@@ -328,6 +375,9 @@ class VoiceTesterViewModel(application: Application) : AndroidViewModel(applicat
     private companion object {
         const val LOG_LIMIT = 50
         const val CACHE_LIMIT = 32
+
+        /** 設定の書き込みを待つ時間。スライダーを離してから書き始めるくらいの間。 */
+        const val SAVE_DELAY_MS = 400L
         val TIME_FORMAT = SimpleDateFormat("HH:mm:ss", Locale.US)
     }
 }
