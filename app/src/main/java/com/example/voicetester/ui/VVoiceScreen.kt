@@ -567,7 +567,7 @@ private fun SystemView(state: VVoiceState, vm: VoiceTesterViewModel) {
         }
 
         Text(
-            text = "V-VOICE 1.0  /  SECURE COMMUNICATION SYSTEM",
+            text = "V-VOICE 1.1  /  SECURE COMMUNICATION SYSTEM",
             style = VvType.mark.copy(fontSize = 10.sp),
             color = VvOff,
             modifier = Modifier.padding(14.dp),

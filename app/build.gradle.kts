@@ -16,8 +16,8 @@ android {
         // 26 にすると Adaptive Icon の XML だけで済み、PNG の launcher アセットが不要になる。
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // VOICEVOX CORE / ONNX Runtime のネイティブライブラリがある ABI だけを対象にする。
