@@ -11,10 +11,16 @@
 
   合計約 190MB。初回のみダウンロードが走る。
 
-  音声モデル (VVM) の取得には利用規約への同意が必要で、既定では対話プロンプトで
-  確認する。-AcceptTerms を指定すると非対話で自動承諾するが、これは「実行者が
-  規約に事前同意している」ことを前提にした機能であり、同意の省略ではない。
+  音声モデル (VVM) の取得には利用規約への同意が必要で、既定では公式ダウンローダの
+  対話プロンプトで確認する。-AcceptTerms を指定すると、実行者が規約に事前同意して
+  いる前提で、モデル実体 (VOICEVOX/voicevox_vvm の GitHub Releases アセット) を
+  直接取得し対話をスキップする。同意そのものを省略する機能ではない。
   CI で使う場合は、ワークフロー側で規約確認済みであることを踏まえて指定すること。
+
+  (公式ダウンローダの対話プロンプトを標準入力経由で自動応答する方式も試したが、
+  規約テキスト表示に使われる `minus` ページャーが日本語のマルチバイト文字境界で
+  パニックし、以後の入力を毎回不正な値として拒否するようになる既知の問題がある
+  ため、モデル実体の直接取得に切り替えている。)
 
 .PARAMETER Arm64Only
   エミュレータ用の x86_64 ネイティブライブラリを取得しない。実機だけで使うなら
@@ -154,20 +160,28 @@ $modelDest = Join-Path $Assets "model/$ModelFile"
 if ((Test-Path $modelDest) -and -not $Force) {
     Step "skip (cached): $ModelFile"
 } else {
-    $dl = Join-Path $Work 'download.exe'
-    Get-File "https://github.com/VOICEVOX/voicevox_core/releases/download/$CoreVersion/download-windows-x64.exe" $dl
-
     $dlOut = Join-Path $Work 'vvmodel'
     if (Test-Path $dlOut) { Remove-Item $dlOut -Recurse -Force }
 
     if ($AcceptTerms) {
-        # ダウンローダ (Rust 製 CLI) に -y 等の非対話フラグは存在しない。
-        # 標準入力に "y" を渡すと対話プロンプトがそれを読んで同意扱いになる
-        # (ソース: voicevox_core crates/downloader の確認応答ロジック)。
+        # ダウンローダ (Rust 製 CLI) に -y 等の非対話フラグは存在しない。標準入力に
+        # "y" を渡す方式も試したが、規約テキスト表示に使われる `minus` ページャーが
+        # 日本語のマルチバイト文字境界でパニックし、その後の標準入力の扱いが壊れて
+        # 常に不正な入力として弾かれる (GitHub Actions の pwsh、Windows PowerShell
+        # 5.1 の両方で再現。BOM 除去やエンコーディング指定でも解消しなかった)。
+        #
+        # モデル実体は VOICEVOX/voicevox_vvm の GitHub Releases に通常の公開アセット
+        # として置かれており、ダウンローダは規約表示の窓口に過ぎない
+        # (crates/downloader は octocrab 経由でこのリポジトリの Release Asset を
+        # 取得しているだけで、GitHub 側のアセット配信自体に同意チェックは無い)。
         # -AcceptTerms は「実行者が規約に事前同意している」前提の機能であり、
-        # 同意そのものを省略するものではない。
-        Step "AcceptTerms: 利用規約に自動同意して続行します (https://voicevox.hiroshiba.jp/term/)"
-        'y' | & $dl --only models --models-pattern $ModelFile -o $dlOut
+        # ダウンローダの対話をスキップしても規約遵守義務がなくなるわけではない。
+        Step "AcceptTerms: 利用規約に事前同意済みとして、モデルを直接取得します (https://voicevox.hiroshiba.jp/term/)"
+        $modelUrl = "https://github.com/VOICEVOX/voicevox_vvm/releases/download/$CoreVersion/$ModelFile"
+        New-Item -ItemType Directory -Force $dlOut | Out-Null
+        # Invoke-WebRequest は失敗時に例外を投げる ($ErrorActionPreference = 'Stop' 済み)
+        # ため、ここでは $LASTEXITCODE によるチェックを行わない。
+        Invoke-WebRequest -Uri $modelUrl -OutFile (Join-Path $dlOut $ModelFile) -TimeoutSec 600 -UseBasicParsing
     } else {
         Write-Host ''
         Write-Host '  音声モデルのダウンロードには利用規約への同意が必要です。' -ForegroundColor Yellow
@@ -175,10 +189,12 @@ if ((Test-Path $modelDest) -and -not $Force) {
         Write-Host '  対話可能なターミナルで実行してください（CI やパイプ経由では止まります）。' -ForegroundColor Yellow
         Write-Host '  https://voicevox.hiroshiba.jp/term/' -ForegroundColor Yellow
         Write-Host ''
+        $dl = Join-Path $Work 'download.exe'
+        Get-File "https://github.com/VOICEVOX/voicevox_core/releases/download/$CoreVersion/download-windows-x64.exe" $dl
         & $dl --only models --models-pattern $ModelFile -o $dlOut
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw 'model download failed. 規約に同意しなかった場合と、対話できない環境で -AcceptTerms なしに実行した場合にここで止まります。'
+        if ($LASTEXITCODE -ne 0) {
+            throw 'model download failed. 規約に同意しなかった場合と、対話できない環境で -AcceptTerms なしに実行した場合にここで止まります。'
+        }
     }
 
     $vvm = Get-ChildItem $dlOut -Recurse -Filter $ModelFile | Select-Object -First 1
