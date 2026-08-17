@@ -117,6 +117,8 @@ keytool -genkeypair -v `
 
 対話でメールアドレスや組織名などを聞かれます。適当な値で構いません（配布用途では証明書の内容は検証に使われません）。
 
+**⚠️ 新しめの JDK では `-storepass` と `-keypass` に別の値を指定しても無視されます。** JDK 9 以降 `keytool` の既定形式が PKCS12 になっており、PKCS12 はストアパスワードとキーパスワードを区別できない仕様のためです（`-keypass` を指定すると警告が出て黙って無視されます）。**`KEYSTORE_PASSWORD` と `KEY_PASSWORD` は同じ値を Secrets に登録してください。**
+
 **⚠️ `v-voice-release.jks` は絶対に紛失しないでください。** 紛失すると以後同じ署名でアプリを更新できなくなり、ユーザーは一度アンインストールしてから入れ直す必要が生じます。安全な場所（パスワードマネージャーの添付ファイル機能など）に必ずバックアップしてください。このファイルは `.gitignore` 済みで、リポジトリには絶対にコミットされません。
 
 #### 2. キーストアを base64 化する
@@ -140,7 +142,7 @@ base64 -i v-voice-release.jks -o keystore.b64
 | `KEYSTORE_BASE64` | `keystore.b64` の中身（1 の base64 文字列） |
 | `KEYSTORE_PASSWORD` | 1 で指定した `-storepass` |
 | `KEY_ALIAS` | 1 で指定した `-alias`（例の場合 `v-voice`） |
-| `KEY_PASSWORD` | 1 で指定した `-keypass` |
+| `KEY_PASSWORD` | `KEYSTORE_PASSWORD` と同じ値（PKCS12 の制約上、別の値は無視される） |
 
 登録後、`keystore.b64` はローカルから削除して構いません（Secrets に保存済み）。
 
@@ -163,7 +165,7 @@ CI を実際に走らせなくても、手元で同じビルドを再現でき�
 $env:KEYSTORE_BASE64 = Get-Content keystore.b64 -Raw
 $env:KEYSTORE_PASSWORD = "<キーストアのパスワード>"
 $env:KEY_ALIAS = "v-voice"
-$env:KEY_PASSWORD = "<キーのパスワード>"
+$env:KEY_PASSWORD = "<キーストアのパスワードと同じ値>"
 
 .\gradlew.bat :app:assembleRelease
 ```
