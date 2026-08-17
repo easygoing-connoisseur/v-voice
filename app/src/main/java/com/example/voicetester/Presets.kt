@@ -20,8 +20,11 @@ val INTONATIONS = listOf(
 )
 
 /**
- * クイックコマンド。固有名詞は SYSTEM > IDENTITY で差し替えられるようテンプレートにしてある。
+ * クイックコマンドの既定値。固有名詞は SYSTEM > IDENTITY で差し替えられるようテンプレートにしてある。
  * `{self}` = UNIT NAME、`{other}` = CONTACT 01、`{other2}` = CONTACT 02。
+ *
+ * 中身は SYSTEM > QUICK COMMAND から編集でき、編集後は端末に保存される。
+ * ここはあくまで初期値と RESET の戻り先。
  */
 val QUICK_COMMANDS = listOf(
     "私は{self}です",
@@ -33,6 +36,9 @@ val QUICK_COMMANDS = listOf(
     "{other}さん",
     "了解したよ",
 )
+
+/** クイックコマンドの上限。MAIN の 2 列グリッドが縦に伸びすぎない範囲に留める。 */
+const val QUICK_MAX = 12
 
 /**
  * 呼び名。SYSTEM > IDENTITY でいつでも変更できる。

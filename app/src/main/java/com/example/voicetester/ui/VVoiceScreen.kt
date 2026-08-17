@@ -10,14 +10,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -47,13 +50,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -64,7 +70,7 @@ import com.example.voicetester.Identity
 import com.example.voicetester.LogEntry
 import com.example.voicetester.PITCH_MAX
 import com.example.voicetester.PITCH_MIN
-import com.example.voicetester.QUICK_COMMANDS
+import com.example.voicetester.QUICK_MAX
 import com.example.voicetester.SPEED_MAX
 import com.example.voicetester.SPEED_MIN
 import com.example.voicetester.Status
@@ -82,6 +88,7 @@ import com.example.voicetester.ui.theme.VvPanel
 import com.example.voicetester.ui.theme.VvPanel2
 import com.example.voicetester.ui.theme.VvRed
 import com.example.voicetester.ui.theme.VvType
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 private enum class Tab(val label: String) { MAIN("MAIN"), LOG("LOG"), SYSTEM("SYSTEM") }
@@ -97,7 +104,10 @@ fun VVoiceScreen(viewModel: VoiceTesterViewModel = viewModel()) {
             .fillMaxSize()
             .background(VvBg)
             // edge-to-edge なのでステータスバー / ナビゲーションバーの領域を自前で避ける
-            .windowInsetsPadding(WindowInsets.systemBars),
+            .windowInsetsPadding(WindowInsets.systemBars)
+            // ソフトキーボードの分だけ画面を詰める。詰めた結果スクロール領域が縮み、
+            // フォーカス中の入力欄がキーボードの上へ自動で送り出される。
+            .imePadding(),
     ) {
         Column(Modifier.fillMaxSize()) {
             Header()
@@ -235,9 +245,12 @@ private fun MainView(state: VVoiceState, vm: VoiceTesterViewModel) {
             TerminalTextField(
                 value = state.text,
                 onValueChange = vm::onTextChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 168.dp),
+                modifier = Modifier.fillMaxWidth(),
                 textStyle = VvType.input,
                 placeholder = "INPUT TEXT",
+                // 枠の高さは入力欄そのものに持たせる。枠にだけ持たせると、
+                // 文字の無い下半分が「押しても反応しない領域」になってしまう。
+                minHeight = INPUT_MIN_HEIGHT,
             )
         }
         Spacer(Modifier.height(12.dp))
@@ -347,9 +360,22 @@ private fun SpeakButton(state: VVoiceState, vm: VoiceTesterViewModel) {
 
 @Composable
 private fun QuickGrid(state: VVoiceState, vm: VoiceTesterViewModel) {
-    // セリフの長さに幅があるので 2 列。8 語ちょうど 4 行で埋まる。
+    // 空欄のスロットは押しても鳴らないので、ボタンとしては並べない。
+    val commands = state.quickCommands.filter { it.isNotBlank() }
+    if (commands.isEmpty()) {
+        Text(
+            text = "NO COMMANDS  /  ADD IN SYSTEM",
+            style = VvType.mark.copy(fontSize = 11.sp),
+            color = VvOff,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().drawTopLine(VvLine).padding(vertical = 26.dp),
+        )
+        return
+    }
+
+    // セリフの長さに幅があるので 2 列。
     Column(Modifier.fillMaxWidth().drawTopLine(VvLine)) {
-        QUICK_COMMANDS.chunked(2).forEach { row ->
+        commands.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth().height(62.dp)) {
                 row.forEachIndexed { index, template ->
                     val label = state.identity.fill(template)
@@ -371,6 +397,10 @@ private fun QuickGrid(state: VVoiceState, vm: VoiceTesterViewModel) {
                             textAlign = TextAlign.Center,
                         )
                     }
+                }
+                // 奇数個のときに最後の 1 個だけ横いっぱいに伸びないよう、空きの半マスを置く
+                if (row.size == 1) {
+                    Box(Modifier.weight(1f).fillMaxHeight().drawStartLine(VvLine))
                 }
             }
             Spacer(Modifier.fillMaxWidth().height(1.dp).background(VvLine))
@@ -452,6 +482,26 @@ private fun SystemView(state: VVoiceState, vm: VoiceTesterViewModel) {
             vm.onIdentityChange(state.identity.copy(other2 = it))
         }
 
+        SectionHeader("QUICK COMMAND", "%02d".format(state.quickCommands.size))
+        state.quickCommands.forEachIndexed { index, template ->
+            QuickCommandRow(
+                index = index,
+                value = template,
+                onChange = { vm.onQuickCommandChange(index, it) },
+                onRemove = { vm.removeQuickCommand(index) },
+            )
+        }
+        if (state.quickCommands.size < QUICK_MAX) {
+            ActionRow("+ ADD COMMAND", onClick = vm::addQuickCommand)
+        }
+        ResetRow(onConfirm = vm::resetQuickCommands)
+        Text(
+            text = "{self} {other} {other2} ARE REPLACED BY IDENTITY.",
+            style = VvType.mark.copy(fontSize = 10.sp),
+            color = VvOff,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+        )
+
         SectionHeader("VOICE CONFIG", null)
         state.styles.forEach { (id, label) ->
             val selected = id == state.styleId
@@ -517,7 +567,7 @@ private fun SystemView(state: VVoiceState, vm: VoiceTesterViewModel) {
         }
 
         Text(
-            text = "V-VOICE 1.0  /  SECURE COMMUNICATION SYSTEM",
+            text = "V-VOICE 1.1  /  SECURE COMMUNICATION SYSTEM",
             style = VvType.mark.copy(fontSize = 10.sp),
             color = VvOff,
             modifier = Modifier.padding(14.dp),
@@ -587,6 +637,74 @@ private fun IdentityRow(key: String, value: String, onChange: (String) -> Unit) 
     }
 }
 
+@Composable
+private fun QuickCommandRow(
+    index: Int,
+    value: String,
+    onChange: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawTopLine(VvLineSoft)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("%02d".format(index + 1), style = VvType.label, color = VvDim)
+        Spacer(Modifier.width(10.dp))
+        TerminalTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.weight(1f),
+            textStyle = VvType.body.copy(fontSize = 14.sp),
+            placeholder = "EMPTY",
+            singleLine = true,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .border(BorderStroke(1.dp, VvLine))
+                .clickable { onRemove() }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Text("DEL", style = VvType.mark.copy(fontSize = 10.sp), color = VvDim)
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(label: String, color: Color = VvGreen, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawTopLine(VvLineSoft)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(label, style = VvType.label, color = color)
+    }
+}
+
+/** 手が滑って書き換えた内容を失わないよう、2 度押しで初期値に戻す。 */
+@Composable
+private fun ResetRow(onConfirm: () -> Unit) {
+    var armed by remember { mutableStateOf(false) }
+    LaunchedEffect(armed) {
+        if (armed) {
+            delay(CONFIRM_TIMEOUT_MS)
+            armed = false
+        }
+    }
+    ActionRow(
+        label = if (armed) "TAP AGAIN TO CONFIRM" else "RESET TO DEFAULTS",
+        color = if (armed) VvRed else VvGreen,
+    ) {
+        if (armed) onConfirm()
+        armed = !armed
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SliderRow(
@@ -632,6 +750,7 @@ private fun SliderRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TerminalTextField(
     value: String,
@@ -640,7 +759,27 @@ private fun TerminalTextField(
     textStyle: TextStyle = VvType.body,
     placeholder: String? = null,
     singleLine: Boolean = false,
+    minHeight: Dp = Dp.Unspecified,
 ) {
+    val focusManager = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    var imeWasShown by remember { mutableStateOf(false) }
+    val imeVisible = WindowInsets.isImeVisible
+
+    // 戻るキーでキーボードを閉じても、入力欄はフォーカスを持ったまま残る。
+    // その状態でもう一度タップしても「すでにフォーカス済み」なのでキーボードが出てこない。
+    // 閉じられたらフォーカスも手放し、次のタップを普通の「入力開始」に戻す。
+    //
+    // フォーカスした直後はキーボードがまだ上がっていないので、
+    // 一度上がったのを見てから閉じたかどうかを判定する。
+    LaunchedEffect(focused, imeVisible) {
+        when {
+            !focused -> imeWasShown = false
+            imeVisible -> imeWasShown = true
+            imeWasShown -> focusManager.clearFocus()
+        }
+    }
+
     Box(
         modifier = modifier
             .background(VvPanel)
@@ -656,7 +795,12 @@ private fun TerminalTextField(
             textStyle = textStyle.merge(LocalTextStyle.current.copy(color = VvInk)).copy(color = VvInk),
             cursorBrush = SolidColor(VvGreen),
             singleLine = singleLine,
-            modifier = Modifier.fillMaxWidth(),
+            // 高さは枠ではなく入力欄自身に持たせる。タップを受けるのは入力欄の範囲だけなので、
+            // 枠だけを高くすると文字の無い部分が反応しない領域になる。
+            modifier = Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = minHeight)
+                .onFocusChanged { focused = it.isFocused },
         )
     }
 }
@@ -715,6 +859,12 @@ private fun Waveform(
 
 private const val MIN_BOOT_MS = 1150
 private const val WINDOW_BUCKETS = 150
+
+/** RESET の 2 度押しを待つ時間。押しっぱなしで待たせない程度。 */
+private const val CONFIRM_TIMEOUT_MS = 3000L
+
+/** INPUT MESSAGE の入力欄の高さ。枠の上下 padding 10dp を足して従来どおり 168dp になる。 */
+private val INPUT_MIN_HEIGHT = 148.dp
 
 /** 細い罫線。枠線ではなく背景として引くので、行の高さに影響しない。 */
 private fun Modifier.drawBottomLine(color: Color, width: Float = 1f) = drawBehind {

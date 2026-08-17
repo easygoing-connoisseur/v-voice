@@ -31,11 +31,15 @@ HTML 版は ENGINE に繋がらない場合、ブラウザ標準の読み上げ 
 
 - **MAIN** — 文章入力、SPEAK、クイックコマンド
 - **LOG** — 発話履歴（時刻・本文・使用した声）。メモリ上のみで、終了すると消えます
-- **SYSTEM** — 呼び名、声、速度、ピッチ、抑揚、区切りの間、クレジット
+- **SYSTEM** — 呼び名、クイックコマンドの編集、声、速度、ピッチ、抑揚、区切りの間、クレジット
 
 **クイックコマンドは押した瞬間に喋ります。** 確認の一手間は挟みません。合成結果はキャッシュするので、同じ文言の 2 回目以降は待ち時間ゼロです。
 
 **呼び名は SYSTEM > IDENTITY で変更できます。** クイックコマンドの `私は{self}です` や `{other}さん` に差し込まれ、入力した瞬間にボタンの表示が変わります。既定値は中立な名前なので、好きな名前に置き換えてください。
+
+**クイックコマンドの中身は SYSTEM > QUICK COMMAND で編集できます。** 文言の書き換え、行の追加・削除（最大 12 件）、既定値へのリセットができます。`{self}` `{other}` `{other2}` と書いた箇所に IDENTITY の呼び名が差し込まれます。RESET は誤操作を防ぐため 2 度押しです。
+
+**設定は保存されます。** 呼び名・クイックコマンド・声・速度・ピッチ・抑揚・区切りの間は、次に開いたときに元どおりになります（Android 版は端末内、HTML 版はブラウザの localStorage）。LOG だけは保存しません。
 
 **抑揚 (INTONATION)** は 3 段階です。`NATURAL` / `FLAT` / `MONOTONE` の順に平坦になり、合成音声らしい淡々とした話し方になります。VOICEVOX では `intonationScale` を直接操作し、標準 TTS へフォールバックしたときは句読点で文を分割して抑揚を崩します。
 
@@ -82,7 +86,7 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch_assets.ps1
 実機のみで使う場合は、エミュレータ用の x86_64 ライブラリを省いて 21MB 減らせます。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fetch_assets.ps1 -IncludeX86:$false
+powershell -ExecutionPolicy Bypass -File scripts/fetch_assets.ps1 -Arm64Only
 ```
 
 ### 初回起動について
@@ -90,6 +94,81 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch_assets.ps1 -IncludeX86:$f
 VOICEVOX CORE は辞書もモデルも実ファイルのパスでしか受け取れないため、**初回起動時に約 158MB を内部ストレージへ展開します。** 起動画面に `EXTRACTING` と進捗が出ます。2 回目以降はスキップされます。
 
 その分、端末の占有量は APK と展開分の合計になります。
+
+---
+
+## 署名済み APK のリリース
+
+`v*` 形式のタグを push すると、GitHub Actions（`.github/workflows/release.yml`）が署名済みの release APK をビルドし、GitHub Releases に添付します。非開発者は Releases ページから APK をダウンロードしてインストールするだけで使えます。
+
+### 初回セットアップ（一度だけ）
+
+#### 1. リリース用キーストアを作る
+
+```powershell
+# Windows / macOS 共通（keytool は JDK 同梱）
+keytool -genkeypair -v `
+  -keystore v-voice-release.jks `
+  -alias v-voice `
+  -keyalg RSA -keysize 2048 -validity 10000 `
+  -storepass <キーストアのパスワード> `
+  -keypass <キーのパスワード>
+```
+
+対話でメールアドレスや組織名などを聞かれます。適当な値で構いません（配布用途では証明書の内容は検証に使われません）。
+
+**⚠️ `v-voice-release.jks` は絶対に紛失しないでください。** 紛失すると以後同じ署名でアプリを更新できなくなり、ユーザーは一度アンインストールしてから入れ直す必要が生じます。安全な場所（パスワードマネージャーの添付ファイル機能など）に必ずバックアップしてください。このファイルは `.gitignore` 済みで、リポジトリには絶対にコミットされません。
+
+#### 2. キーストアを base64 化する
+
+```powershell
+# Windows (PowerShell)
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("v-voice-release.jks")) | Set-Content keystore.b64 -NoNewline
+```
+
+```bash
+# macOS
+base64 -i v-voice-release.jks -o keystore.b64
+```
+
+#### 3. GitHub の Secrets に登録する
+
+リポジトリの **Settings > Secrets and variables > Actions > New repository secret** から、以下の 4 つを登録してください。
+
+| Secret 名 | 値 |
+|---|---|
+| `KEYSTORE_BASE64` | `keystore.b64` の中身（1 の base64 文字列） |
+| `KEYSTORE_PASSWORD` | 1 で指定した `-storepass` |
+| `KEY_ALIAS` | 1 で指定した `-alias`（例の場合 `v-voice`） |
+| `KEY_PASSWORD` | 1 で指定した `-keypass` |
+
+登録後、`keystore.b64` はローカルから削除して構いません（Secrets に保存済み）。
+
+### 初回リリースの手順
+
+```powershell
+git tag v1.2.0
+git push --tags
+```
+
+これだけで Actions が起動し、数分後に **Releases** ページに `v-voice-1.2.0.apk` が添付された状態でリリースが作成されます。手動でバージョンを書き換える箇所はありません（`versionName` はタグから、`versionCode` は Actions の実行回数から自動算出されます）。
+
+`workflow_dispatch`（Actions タブから手動実行）も可能ですが、その場合はタグ由来のバージョンが無いため `versionName` は `0.0.0-manual` になります。動作確認用途と考えてください。
+
+### ローカルで動作確認する方法
+
+CI を実際に走らせなくても、手元で同じビルドを再現できます。
+
+```powershell
+$env:KEYSTORE_BASE64 = Get-Content keystore.b64 -Raw
+$env:KEYSTORE_PASSWORD = "<キーストアのパスワード>"
+$env:KEY_ALIAS = "v-voice"
+$env:KEY_PASSWORD = "<キーのパスワード>"
+
+.\gradlew.bat :app:assembleRelease
+```
+
+`app/build/outputs/apk/release/app-release.apk` が署名済みで生成されます。上記の環境変数を設定しない場合は、未署名（または開発時の設定次第でデバッグ署名）で `assembleRelease` が通ります。fork した人や試しにビルドしたい人はこちらの経路になります。
 
 ---
 
