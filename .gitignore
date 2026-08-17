@@ -20,3 +20,8 @@ localrepo/
 .idea/
 *.iml
 .DS_Store
+
+# --- 署名鍵（絶対にコミットしない） ---
+*.jks
+*.keystore
+keystore.properties

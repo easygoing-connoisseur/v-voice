@@ -1,10 +1,30 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Base64
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+// リリース署名の情報は環境変数から読む。KEYSTORE_BASE64 はキーストアファイルを
+// base64 化したもので、ビルド時にデコードして一時ファイルへ書き出す。
+// いずれかが未設定なら release 署名は適用しない（fork / 手元ビルドを壊さないため）。
+val keystoreBase64: String? = System.getenv("KEYSTORE_BASE64")
+val envKeystorePassword: String? = System.getenv("KEYSTORE_PASSWORD")
+val envKeyAlias: String? = System.getenv("KEY_ALIAS")
+val envKeyPassword: String? = System.getenv("KEY_PASSWORD")
+val hasReleaseSigning = !keystoreBase64.isNullOrBlank() &&
+    !envKeystorePassword.isNullOrBlank() &&
+    !envKeyAlias.isNullOrBlank() &&
+    !envKeyPassword.isNullOrBlank()
+
+val decodedKeystoreFile = if (hasReleaseSigning) {
+    File(layout.buildDirectory.asFile.get(), "release-keystore/release.jks").apply {
+        parentFile.mkdirs()
+        writeBytes(Base64.getDecoder().decode(keystoreBase64))
+    }
+} else null
 
 android {
     namespace = "com.example.voicetester"
@@ -27,6 +47,17 @@ android {
         }
     }
 
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = decodedKeystoreFile
+                storePassword = envKeystorePassword
+                keyAlias = envKeyAlias
+                keyPassword = envKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -34,6 +65,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // 環境変数が揃っていないときは適用しない。fork した人や手元で試す人が
+            // ビルドできなくなるのを避けるため、その場合は未署名/デバッグ署名のまま出す。
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
