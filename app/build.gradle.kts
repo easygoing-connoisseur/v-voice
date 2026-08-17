@@ -36,8 +36,10 @@ android {
         // 26 にすると Adaptive Icon の XML だけで済み、PNG の launcher アセットが不要になる。
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        // CI からは -PreleaseVersionCode / -PreleaseVersionName でタグ由来の値を渡す。
+        // 未指定時（手元ビルド等）はこれまでどおりの固定値を使う。
+        versionCode = (project.findProperty("releaseVersionCode") as String?)?.toInt() ?: 2
+        versionName = project.findProperty("releaseVersionName") as String? ?: "1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // VOICEVOX CORE / ONNX Runtime のネイティブライブラリがある ABI だけを対象にする。
