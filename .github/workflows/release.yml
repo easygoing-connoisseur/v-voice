@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  build-and-release:
+    # fetch_assets.ps1 が PowerShell 前提かつ Windows 固有のパス処理（download-windows-x64.exe
+    # の実行など）を含むため、確実性を優先して windows-latest を使う。
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platforms;android-34'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $versionName = "0.0.0-manual"
+            $versionCode = ${{ github.run_number }}
+          } else {
+            if ($ref -notmatch '^v(\d+\.\d+\.\d+)$') {
+              throw "タグ名がバージョン形式 (v1.2.3) に一致しません: $ref"
+            }
+            $versionName = $Matches[1]
+            $versionCode = ${{ github.run_number }}
+          }
+          Write-Host "versionName=$versionName"
+          Write-Host "versionCode=$versionCode"
+          "versionName=$versionName" >> $env:GITHUB_OUTPUT
+          "versionCode=$versionCode" >> $env:GITHUB_OUTPUT
+
+      - name: Verify signing secrets are present
+        shell: pwsh
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrEmpty($env:KEYSTORE_BASE64)) { $missing += 'KEYSTORE_BASE64' }
+          if ([string]::IsNullOrEmpty($env:KEYSTORE_PASSWORD)) { $missing += 'KEYSTORE_PASSWORD' }
+          if ([string]::IsNullOrEmpty($env:KEY_ALIAS)) { $missing += 'KEY_ALIAS' }
+          if ([string]::IsNullOrEmpty($env:KEY_PASSWORD)) { $missing += 'KEY_PASSWORD' }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::以下の Secrets が未設定のため、署名済み APK をビルドできません: $($missing -join ', ')"
+            Write-Host "::error::リポジトリの Settings > Secrets and variables > Actions で設定してください。"
+            exit 1
+          }
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Hash fetch_assets.ps1 for cache key
+        id: fetch-hash
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 scripts/fetch_assets.ps1).Hash
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Cache fetched assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            .fetch-cache
+            app/src/main/assets/voicevox
+            app/src/main/jniLibs
+            localrepo
+          key: fetch-assets-${{ steps.fetch-hash.outputs.hash }}
+
+      - name: Fetch build assets (VOICEVOX CORE / dict / model)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/fetch_assets.ps1 -AcceptTerms
+
+      - name: Build signed release APK
+        shell: pwsh
+        run: |
+          .\gradlew.bat :app:assembleRelease `
+            "-PreleaseVersionCode=${{ steps.version.outputs.versionCode }}" `
+            "-PreleaseVersionName=${{ steps.version.outputs.versionName }}"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Verify APK is signed
+        shell: pwsh
+        run: |
+          $apk = Get-ChildItem app/build/outputs/apk/release -Filter '*.apk' | Select-Object -First 1
+          if (-not $apk) { throw 'release APK が見つかりません' }
+          $buildTools = Get-ChildItem "$env:ANDROID_HOME/build-tools" | Sort-Object Name -Descending | Select-Object -First 1
+          $apksigner = Join-Path $buildTools.FullName 'apksigner.bat'
+          & $apksigner verify --print-certs $apk.FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw '生成された APK が署名されていません。ビルドを中止します。'
+          }
+
+      - name: Rename APK for release
+        id: rename
+        shell: pwsh
+        run: |
+          $apk = Get-ChildItem app/build/outputs/apk/release -Filter '*.apk' | Select-Object -First 1
+          $name = "v-voice-${{ steps.version.outputs.versionName }}.apk"
+          $dest = Join-Path $apk.DirectoryName $name
+          Copy-Item $apk.FullName $dest -Force
+          "path=$dest" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+          $sizeMb = [Math]::Round(($apk.Length / 1MB), 1)
+          Write-Host "APK size: $sizeMb MB"
+          if ($sizeMb -gt 100) {
+            Write-Host "::warning::APK サイズが 100MB を超えています ($sizeMb MB)。スマホでのダウンロード体験に影響する可能性があります。"
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v-voice ${{ steps.version.outputs.versionName }}
+          files: ${{ steps.rename.outputs.path }}
+          body: |
+            ## インストール手順
+
+            1. 下の Assets から `${{ steps.rename.outputs.name }}` をスマホでダウンロードします。
+            2. インストール時に「提供元不明のアプリ」の許可を求められたら許可してください（Android の設定 > アプリ > 特別なアクセス > 不明なアプリのインストール から、ダウンロードに使ったアプリ（ブラウザ等）に許可を与える形です）。
+            3. 空き容量は APK 本体に加えて、初回起動時に展開される辞書・音声モデル（約 158MB）が必要です。合計で APK サイズ + 160MB 程度を目安に確保してください。
+            4. 初回起動時に `EXTRACTING` という進捗表示とともに辞書・音声モデルが端末内に展開されます。数十秒かかることがありますが、2 回目以降はスキップされます。
+
+            既存バージョンからの上書き更新にも対応しています（署名済みビルドのため「アプリが競合しています」は出ません）。
